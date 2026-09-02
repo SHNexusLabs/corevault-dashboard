@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Filter, Download, Plus, Eye } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Filter, Download, Plus, Eye, ShoppingCart } from "lucide-react";
+
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { SearchInput, Select } from "@/components/ui/Input";
@@ -14,16 +15,16 @@ import {
   Tr,
   Pagination,
 } from "@/components/ui/Table";
-import {
-  OrderStatusBadge,
-  PaymentStatusBadge,
-  PriorityBadge,
-} from "@/components/ui/Badge";
+import { OrderStatusBadge, PaymentStatusBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { MOCK_ORDERS } from "@/lib/data";
 import type { NavigateFn } from "@/lib/navigation";
-import { ShoppingCart } from "lucide-react";
+import {
+  getAdminOrders,
+  type AdminOrder,
+  type OrderStatus,
+  type PaymentStatus,
+} from "@/lib/admin-orders";
 
 interface OrdersProps {
   onNavigate: NavigateFn;
@@ -31,41 +32,88 @@ interface OrdersProps {
 
 const STATUS_TABS = [
   { label: "All", value: "" },
-  { label: "Placed", value: "placed" },
-  { label: "Confirmed", value: "confirmed" },
-  { label: "Processing", value: "processing" },
-  { label: "Packed", value: "packed" },
-  { label: "Ready to Ship", value: "ready_to_ship" },
-  { label: "Shipped", value: "shipped" },
-  { label: "Delivered", value: "delivered" },
-  { label: "Cancelled", value: "cancelled" },
+  { label: "Pending", value: "PENDING" },
+  { label: "Processing", value: "PROCESSING" },
+  { label: "Shipped", value: "SHIPPED" },
+  { label: "Delivered", value: "DELIVERED" },
+  { label: "Cancelled", value: "CANCELLED" },
 ] as const;
 
+const normalizeOrderStatus = (status: OrderStatus) => {
+  return status.toLowerCase() as import("@/lib/types").OrderStatus;
+};
+
+const normalizePaymentStatus = (status: PaymentStatus) => {
+  return status.toLowerCase() as import("@/lib/types").PaymentStatus;
+};
+
 export function Orders({ onNavigate }: OrdersProps) {
-  const goToOrder = (id: string) => onNavigate("order-detail", id);
+  const goToOrder = (id: string) => {
+    onNavigate("order-detail", id);
+  };
+
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [search, setSearch] = useState("");
   const [statusTab, setStatusTab] = useState("");
   const [paymentFilter, setPaymentFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
   const [page, setPage] = useState(1);
   const perPage = 10;
 
-  const filtered = MOCK_ORDERS.filter((o) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      !q ||
-      o.id.toLowerCase().includes(q) ||
-      o.customerName.toLowerCase().includes(q) ||
-      o.customerEmail.toLowerCase().includes(q) ||
-      o.transactionId.toLowerCase().includes(q);
-    const matchStatus = !statusTab || o.orderStatus === statusTab;
-    const matchPayment = !paymentFilter || o.paymentStatus === paymentFilter;
-    const matchPriority = !priorityFilter || o.priority === priorityFilter;
-    return matchSearch && matchStatus && matchPayment && matchPriority;
-  });
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const paged = filtered.slice((page - 1) * perPage, page * perPage);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOrders() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await getAdminOrders(page, perPage, {
+          search,
+          status: statusTab as OrderStatus | "",
+          paymentStatus: paymentFilter as PaymentStatus | "",
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setOrders(response.orders);
+        setTotal(response.pagination.total);
+        setTotalPages(response.pagination.totalPages);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Failed to fetch orders:", err);
+
+        setOrders([]);
+        setTotal(0);
+        setTotalPages(1);
+
+        setError(err instanceof Error ? err.message : "Failed to load orders");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadOrders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page, search, statusTab, paymentFilter]);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected);
@@ -80,20 +128,42 @@ export function Orders({ onNavigate }: OrdersProps) {
   };
 
   const allSelected =
-    paged.length > 0 && paged.every((o) => selected.has(o.id));
+    orders.length > 0 && orders.every((order) => selected.has(order.id));
+
   const toggleAll = () => {
-    if (allSelected)
-      setSelected((s) => {
-        const n = new Set(s);
-        paged.forEach((o) => n.delete(o.id));
-        return n;
+    if (allSelected) {
+      setSelected((current) => {
+        const next = new Set(current);
+
+        orders.forEach((order) => {
+          next.delete(order.id);
+        });
+
+        return next;
       });
-    else
-      setSelected((s) => {
-        const n = new Set(s);
-        paged.forEach((o) => n.add(o.id));
-        return n;
+    } else {
+      setSelected((current) => {
+        const next = new Set(current);
+
+        orders.forEach((order) => {
+          next.add(order.id);
+        });
+
+        return next;
       });
+    }
+  };
+
+  const changeStatusTab = (value: string) => {
+    setStatusTab(value);
+    setPage(1);
+    setSelected(new Set());
+  };
+
+  const changePaymentFilter = (value: string) => {
+    setPaymentFilter(value);
+    setPage(1);
+    setSelected(new Set());
   };
 
   return (
@@ -103,24 +173,29 @@ export function Orders({ onNavigate }: OrdersProps) {
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-text">All Orders</h2>
+
             <span className="text-xs text-text-muted bg-surface-elevated px-2 py-0.5 rounded-full font-mono">
-              {MOCK_ORDERS.length}
+              {total}
             </span>
           </div>
+
           <div className="flex items-center gap-2 flex-wrap">
             {selected.size > 0 && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-text-secondary">
                   {selected.size} selected
                 </span>
+
                 <Button variant="outline" size="sm">
                   Bulk Status
                 </Button>
+
                 <Button variant="outline" size="sm">
                   Print Labels
                 </Button>
               </div>
             )}
+
             <Button
               variant="ghost"
               size="sm"
@@ -128,6 +203,7 @@ export function Orders({ onNavigate }: OrdersProps) {
             >
               Export
             </Button>
+
             <Button
               variant="primary"
               size="sm"
@@ -143,18 +219,15 @@ export function Orders({ onNavigate }: OrdersProps) {
           {STATUS_TABS.map((tab) => (
             <button
               key={tab.value}
-              className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${statusTab === tab.value ? "text-brand border-brand" : "text-text-muted border-transparent hover:text-text-secondary"}`}
-              onClick={() => {
-                setStatusTab(tab.value);
-                setPage(1);
-              }}
+              type="button"
+              className={`px-3 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
+                statusTab === tab.value
+                  ? "text-brand border-brand"
+                  : "text-text-muted border-transparent hover:text-text-secondary"
+              }`}
+              onClick={() => changeStatusTab(tab.value)}
             >
               {tab.label}
-              {tab.value === "" && (
-                <span className="ml-1.5 text-[10px] bg-surface-elevated px-1.5 py-0.5 rounded-full font-mono">
-                  {MOCK_ORDERS.length}
-                </span>
-              )}
             </button>
           ))}
         </div>
@@ -170,31 +243,18 @@ export function Orders({ onNavigate }: OrdersProps) {
               setPage(1);
             }}
           />
+
           <Select
             value={paymentFilter}
-            onChange={(e) => {
-              setPaymentFilter(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => changePaymentFilter(e.target.value)}
           >
             <option value="">All Payments</option>
-            <option value="paid">Paid</option>
-            <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
-            <option value="refunded">Refunded</option>
+            <option value="PAID">Paid</option>
+            <option value="PENDING">Pending</option>
+            <option value="FAILED">Failed</option>
+            <option value="REFUNDED">Refunded</option>
           </Select>
-          <Select
-            value={priorityFilter}
-            onChange={(e) => {
-              setPriorityFilter(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="normal">Normal</option>
-          </Select>
+
           <Button
             variant="ghost"
             size="sm"
@@ -204,8 +264,34 @@ export function Orders({ onNavigate }: OrdersProps) {
           </Button>
         </div>
 
-        {/* Table / Card list */}
-        {paged.length === 0 ? (
+        {/* Loading */}
+        {loading ? (
+          <div className="py-20 text-center">
+            <p className="text-sm text-text-muted">Loading orders...</p>
+          </div>
+        ) : error ? (
+          /* Error */
+          <div className="py-20 text-center px-4">
+            <p className="text-sm font-medium text-text">
+              Failed to load orders
+            </p>
+
+            <p className="text-xs text-text-muted mt-1">{error}</p>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              onClick={() => {
+                setError(null);
+                setPage((current) => current);
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : orders.length === 0 ? (
+          /* Empty */
           <EmptyState
             icon={ShoppingCart}
             title="No orders found"
@@ -227,19 +313,20 @@ export function Orders({ onNavigate }: OrdersProps) {
                         className="rounded border-border bg-surface-elevated accent-brand"
                       />
                     </Th>
+
                     <Th sortable>Order ID</Th>
                     <Th sortable>Customer</Th>
                     <Th>Items</Th>
                     <Th sortable>Amount</Th>
                     <Th>Payment</Th>
                     <Th>Order Status</Th>
-                    <Th>Priority</Th>
                     <Th sortable>Date</Th>
                     <Th className="w-8" />
                   </tr>
                 </Thead>
+
                 <Tbody>
-                  {paged.map((order) => (
+                  {orders.map((order) => (
                     <Tr
                       key={order.id}
                       onClick={() => goToOrder(order.id)}
@@ -254,48 +341,59 @@ export function Orders({ onNavigate }: OrdersProps) {
                           className="rounded border-border bg-surface-elevated accent-brand"
                         />
                       </Td>
+
                       <Td>
                         <span className="font-mono text-xs font-semibold text-brand">
-                          {order.id}
+                          {order.orderNumber}
                         </span>
                       </Td>
+
                       <Td>
                         <div>
                           <p className="text-xs font-medium text-text">
-                            {order.customerName}
+                            {order.user.name}
                           </p>
+
                           <p className="text-[11px] text-text-muted">
-                            {order.customerEmail}
+                            {order.user.email}
                           </p>
                         </div>
                       </Td>
+
                       <Td>
                         <span className="font-mono text-xs text-text">
                           {order.items.length} item
                           {order.items.length > 1 ? "s" : ""}
                         </span>
                       </Td>
+
                       <Td>
                         <span className="font-mono text-xs font-medium text-text">
-                          {formatCurrency(order.total)}
+                          {formatCurrency(Number(order.total))}
                         </span>
                       </Td>
+
                       <Td>
-                        <PaymentStatusBadge status={order.paymentStatus} />
+                        <PaymentStatusBadge
+                          status={normalizePaymentStatus(order.paymentStatus)}
+                        />
                       </Td>
+
                       <Td>
-                        <OrderStatusBadge status={order.orderStatus} />
+                        <OrderStatusBadge
+                          status={normalizeOrderStatus(order.status)}
+                        />
                       </Td>
-                      <Td>
-                        <PriorityBadge priority={order.priority} />
-                      </Td>
+
                       <Td>
                         <span className="text-xs text-text-secondary">
-                          {formatDate(order.date)}
+                          {formatDate(new Date(order.createdAt))}
                         </span>
                       </Td>
+
                       <Td>
                         <button
+                          type="button"
                           className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -313,38 +411,45 @@ export function Orders({ onNavigate }: OrdersProps) {
 
             {/* Mobile card list */}
             <div className="md:hidden divide-y divide-border/50">
-              {paged.map((order) => (
+              {orders.map((order) => (
                 <button
                   key={order.id}
+                  type="button"
                   className="w-full text-left px-4 py-3 hover:bg-surface-elevated/50 transition-colors"
                   onClick={() => goToOrder(order.id)}
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <span className="font-mono text-xs font-semibold text-brand">
-                      {order.id}
+                      {order.orderNumber}
                     </span>
-                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                      <OrderStatusBadge status={order.orderStatus} />
-                      <PriorityBadge priority={order.priority} />
-                    </div>
+
+                    <OrderStatusBadge
+                      status={normalizeOrderStatus(order.status)}
+                    />
                   </div>
+
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs font-medium text-text">
-                        {order.customerName}
+                        {order.user.name}
                       </p>
+
                       <p className="text-[11px] text-text-muted mt-0.5">
                         {order.items.length} item
                         {order.items.length > 1 ? "s" : ""} ·{" "}
-                        {formatDate(order.date)}
+                        {formatDate(new Date(order.createdAt))}
                       </p>
                     </div>
+
                     <div className="text-right">
                       <p className="text-xs font-mono font-semibold text-text">
-                        {formatCurrency(order.total)}
+                        {formatCurrency(Number(order.total))}
                       </p>
+
                       <div className="mt-0.5">
-                        <PaymentStatusBadge status={order.paymentStatus} />
+                        <PaymentStatusBadge
+                          status={normalizePaymentStatus(order.paymentStatus)}
+                        />
                       </div>
                     </div>
                   </div>
@@ -352,11 +457,17 @@ export function Orders({ onNavigate }: OrdersProps) {
               ))}
             </div>
 
+            {/* Pagination */}
             <Pagination
               page={page}
-              total={filtered.length}
+              total={total}
               perPage={perPage}
-              onChange={setPage}
+              onChange={(nextPage) => {
+                if (nextPage >= 1 && nextPage <= totalPages) {
+                  setPage(nextPage);
+                  setSelected(new Set());
+                }
+              }}
             />
           </>
         )}

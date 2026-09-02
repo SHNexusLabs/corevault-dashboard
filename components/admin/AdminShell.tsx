@@ -2,60 +2,78 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+
 import { Sidebar } from "@/components/admin/Sidebar";
 import { Header } from "@/components/admin/Header";
 import { ToastProvider } from "@/components/ui/Toast";
+
 import { pageToHref, pathToPage, type NavigateFn } from "@/lib/navigation";
+import { getCurrentUser, logout } from "@/lib/auth";
+
 import type { UserRole } from "@/lib/types";
-
-type Theme = "dark" | "light";
-
-const THEME_STORAGE_KEY = "corevault-admin-theme";
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
 
-  // Temporary mock session.
-  // Replace with auth API/session after UI migration.
-  const role: UserRole = "super_admin";
-  const userName = "CoreVault Admin";
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") {
+      return "dark";
+    }
+
+    const savedTheme = window.localStorage.getItem("corevault-admin-theme");
+
+    return savedTheme === "light" ? "light" : "dark";
+  });
+
+  const [userName, setUserName] = useState("Loading...");
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const currentPage = pathToPage(pathname);
 
-  /*
-   * Load the saved theme without triggering setState()
-   * directly inside an effect.
-   */
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-
-    if (savedTheme === "light") {
-      document.documentElement.classList.add("theme-light");
-      document.documentElement.dataset.theme = "light";
-    } else {
-      document.documentElement.classList.remove("theme-light");
-      document.documentElement.dataset.theme = "dark";
-    }
-  }, []);
-
-  /*
-   * Keep localStorage and the document theme synchronized
-   * whenever React's theme state changes.
-   */
-  useEffect(() => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-
-    if (theme === "light") {
-      document.documentElement.classList.add("theme-light");
-      document.documentElement.dataset.theme = "light";
-    } else {
-      document.documentElement.classList.remove("theme-light");
-      document.documentElement.dataset.theme = "dark";
-    }
+    window.localStorage.setItem("corevault-admin-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUser() {
+      try {
+        const user = await getCurrentUser();
+
+        if (cancelled) return;
+
+        if (user.role !== "ADMIN" && user.role !== "SUPER_ADMIN") {
+          logout();
+          router.replace("/login");
+          return;
+        }
+
+        setUserName(user.name);
+
+        setRole(user.role === "SUPER_ADMIN" ? "super_admin" : "admin");
+      } catch {
+        if (!cancelled) {
+          logout();
+          router.replace("/login");
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    loadUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const navigate = useCallback<NavigateFn>(
     (page, entityId) => {
@@ -65,13 +83,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   );
 
   const handleLogout = () => {
-    // TODO: call backend logout / clear auth cookie.
-    router.push("/login");
+    logout();
+    router.replace("/login");
   };
 
-  const handleThemeToggle = () => {
-    setTheme((currentTheme) => (currentTheme === "dark" ? "light" : "dark"));
-  };
+  if (authLoading || !role) {
+    return (
+      <div className="h-dvh flex items-center justify-center bg-surface text-text">
+        <div className="text-sm text-text-muted">Loading CoreVault...</div>
+      </div>
+    );
+  }
 
   return (
     <div className={theme === "light" ? "theme-light" : ""}>
@@ -84,7 +106,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             collapsed={sidebarCollapsed}
             onCollapse={setSidebarCollapsed}
             theme={theme}
-            onThemeToggle={handleThemeToggle}
+            onThemeToggle={() =>
+              setTheme((current) => (current === "dark" ? "light" : "dark"))
+            }
           />
 
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -93,9 +117,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               onNavigate={navigate}
               role={role}
               sidebarCollapsed={sidebarCollapsed}
-              onSidebarToggle={() =>
-                setSidebarCollapsed((collapsed) => !collapsed)
-              }
+              onSidebarToggle={() => setSidebarCollapsed((current) => !current)}
               userName={userName}
               onLogout={handleLogout}
             />
