@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { ProductDetail } from "@/components/admin/CatalogPages";
+import { ProductDetail } from "@/components/admin/ProductDetail";
 import { pageToHref } from "@/lib/navigation";
 import type { Page } from "@/lib/types";
 
