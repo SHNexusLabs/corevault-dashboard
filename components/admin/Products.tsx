@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+
+import { useEffect, useState } from "react";
 import {
   Plus,
   Eye,
@@ -9,6 +10,7 @@ import {
   Box,
   Image as ImageIcon,
 } from "lucide-react";
+
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { SearchInput, Select } from "@/components/ui/Input";
@@ -23,91 +25,157 @@ import {
 } from "@/components/ui/Table";
 import { StockBadge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+
 import { formatCurrency, formatShortDate } from "@/lib/utils";
-import { MOCK_PRODUCTS } from "@/lib/data";
-import type { StockStatus } from "@/lib/types";
 import type { NavigateFn } from "@/lib/navigation";
+
+import {
+  getAdminProducts,
+  deleteAdminProduct,
+  type AdminProduct,
+  type ProductStockStatus,
+} from "@/lib/admin-products";
 
 interface ProductsProps {
   onNavigate: NavigateFn;
 }
 
-function getStockStatus(p: (typeof MOCK_PRODUCTS)[0]): StockStatus {
-  if (p.available === 0) return "out_of_stock";
-  if (p.available <= p.lowStockThreshold) return "low_stock";
-  return "in_stock";
-}
+const PER_PAGE = 8;
 
 export function Products({ onNavigate }: ProductsProps) {
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [page, setPage] = useState(1);
-  const perPage = 8;
+  const [products, setProducts] = useState<AdminProduct[]>([]);
 
-  const categories = [...new Set(MOCK_PRODUCTS.map((p) => p.category))];
-
-  const filtered = MOCK_PRODUCTS.filter((p) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q) ||
-      p.brand.toLowerCase().includes(q);
-    const matchCat = !categoryFilter || p.category === categoryFilter;
-    const matchStatus = !statusFilter || getStockStatus(p) === statusFilter;
-    return matchSearch && matchCat && matchStatus;
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    lowStock: 0,
+    outOfStock: 0,
   });
 
-  const paged = filtered.slice((page - 1) * perPage, page * perPage);
+  const [total, setTotal] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ProductStockStatus | "">("");
+
+  const [page, setPage] = useState(1);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const timeout = setTimeout(async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const data = await getAdminProducts(page, PER_PAGE, {
+          search: search.trim() || undefined,
+          categoryId: categoryFilter || undefined,
+          stockStatus: statusFilter || undefined,
+        });
+
+        setProducts(data.products);
+        setStats(data.stats);
+        setTotal(data.pagination.total);
+      } catch (error) {
+        console.error("Load products error:", error);
+
+        setError(
+          error instanceof Error ? error.message : "Unable to load products",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [page, search, categoryFilter, statusFilter, refreshKey]);
+
+  function handleCategoryChange(value: string) {
+    setCategoryFilter(value);
+    setPage(1);
+  }
+
+  function handleStatusChange(value: string) {
+    setStatusFilter(value as ProductStockStatus | "");
+    setPage(1);
+  }
+
+  async function handleArchive(product: AdminProduct) {
+    const confirmed = window.confirm(`Archive "${product.name}"?`);
+
+    if (!confirmed) return;
+
+    try {
+      await deleteAdminProduct(product.id);
+
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      console.error("Archive product error:", error);
+
+      window.alert(
+        error instanceof Error ? error.message : "Unable to archive product",
+      );
+    }
+  }
+
+  const categories = Array.from(
+    new Map(
+      products.map((product) => [product.category.id, product.category]),
+    ).values(),
+  );
+
+  const statsCards = [
+    {
+      label: "Total Products",
+      value: stats.total,
+      color: "text-brand",
+    },
+    {
+      label: "Active",
+      value: stats.active,
+      color: "text-success",
+    },
+    {
+      label: "Low Stock",
+      value: stats.lowStock,
+      color: "text-warning",
+    },
+    {
+      label: "Out of Stock",
+      value: stats.outOfStock,
+      color: "text-danger",
+    },
+  ];
 
   return (
     <div className="flex-1 overflow-y-auto p-5">
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        {[
-          {
-            label: "Total Products",
-            value: MOCK_PRODUCTS.length,
-            color: "text-brand",
-          },
-          {
-            label: "Active",
-            value: MOCK_PRODUCTS.filter((p) => p.status === "active").length,
-            color: "text-success",
-          },
-          {
-            label: "Low Stock",
-            value: MOCK_PRODUCTS.filter(
-              (p) => getStockStatus(p) === "low_stock",
-            ).length,
-            color: "text-warning",
-          },
-          {
-            label: "Out of Stock",
-            value: MOCK_PRODUCTS.filter(
-              (p) => getStockStatus(p) === "out_of_stock",
-            ).length,
-            color: "text-danger",
-          },
-        ].map((s) => (
-          <Card key={s.label} className="p-3">
-            <p className="text-[11px] text-text-muted mb-0.5">{s.label}</p>
-            <p className={`text-xl font-bold font-mono ${s.color}`}>
-              {s.value}
+        {statsCards.map((stat) => (
+          <Card key={stat.label} className="p-3">
+            <p className="text-[11px] text-text-muted mb-0.5">{stat.label}</p>
+
+            <p className={`text-xl font-bold font-mono ${stat.color}`}>
+              {stat.value}
             </p>
           </Card>
         ))}
       </div>
 
       <Card>
+        {/* Header */}
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-text">Products</h2>
+
             <span className="text-xs text-text-muted bg-surface-elevated px-2 py-0.5 rounded-full font-mono">
-              {MOCK_PRODUCTS.length}
+              {total}
             </span>
           </div>
+
           <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="ghost"
@@ -116,6 +184,7 @@ export function Products({ onNavigate }: ProductsProps) {
             >
               Export
             </Button>
+
             <Button
               variant="primary"
               size="sm"
@@ -127,6 +196,7 @@ export function Products({ onNavigate }: ProductsProps) {
           </div>
         </div>
 
+        {/* Filters */}
         <div className="px-4 py-3 flex items-center gap-2 flex-wrap border-b border-border">
           <SearchInput
             className="w-56"
@@ -137,26 +207,23 @@ export function Products({ onNavigate }: ProductsProps) {
               setPage(1);
             }}
           />
+
           <Select
             value={categoryFilter}
-            onChange={(e) => {
-              setCategoryFilter(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => handleCategoryChange(e.target.value)}
           >
             <option value="">All Categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
+
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
               </option>
             ))}
           </Select>
+
           <Select
             value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => handleStatusChange(e.target.value)}
           >
             <option value="">All Stock Status</option>
             <option value="in_stock">In Stock</option>
@@ -165,7 +232,19 @@ export function Products({ onNavigate }: ProductsProps) {
           </Select>
         </div>
 
-        {paged.length === 0 ? (
+        {/* Error */}
+        {error && (
+          <div className="px-4 py-3 border-b border-border">
+            <p className="text-xs text-danger">{error}</p>
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading ? (
+          <div className="py-20 flex items-center justify-center">
+            <p className="text-sm text-text-muted">Loading products...</p>
+          </div>
+        ) : products.length === 0 ? (
           <EmptyState
             icon={Box}
             title="No products found"
@@ -187,103 +266,152 @@ export function Products({ onNavigate }: ProductsProps) {
                   <Th className="w-20" />
                 </tr>
               </Thead>
+
               <Tbody>
-                {paged.map((product) => (
-                  <Tr
-                    key={product.id}
-                    onClick={() => onNavigate("product-detail", product.id)}
-                  >
-                    <Td>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-border flex items-center justify-center shrink-0">
-                          <ImageIcon
-                            className="w-4 h-4 text-text-muted"
-                            aria-hidden="true"
-                          />
+                {products.map((product) => {
+                  const stockStatus: ProductStockStatus =
+                    product.stock === 0
+                      ? "out_of_stock"
+                      : product.stock <= product.lowStockAt
+                        ? "low_stock"
+                        : "in_stock";
+
+                  return (
+                    <Tr
+                      key={product.id}
+                      onClick={() => onNavigate("product-detail", product.id)}
+                    >
+                      {/* Product */}
+                      <Td>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-border flex items-center justify-center shrink-0">
+                            <ImageIcon
+                              className="w-4 h-4 text-text-muted"
+                              aria-hidden="true"
+                            />
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-medium text-text max-w-45 truncate">
+                              {product.name}
+                            </p>
+
+                            <p className="text-[11px] text-text-muted">
+                              {product.brand.name}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-medium text-text max-w-45 truncate">
-                            {product.name}
-                          </p>
-                          <p className="text-[11px] text-text-muted">
-                            {product.brand}
-                          </p>
-                        </div>
-                      </div>
-                    </Td>
-                    <Td>
-                      <span className="font-mono text-xs text-brand">
-                        {product.sku}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="text-xs text-text-secondary">
-                        {product.category}
-                      </span>
-                    </Td>
-                    <Td>
-                      <div>
-                        <p className="font-mono text-xs font-medium text-text">
-                          {formatCurrency(product.price)}
-                        </p>
-                        {product.salePrice && (
-                          <p className="font-mono text-[11px] text-success">
-                            {formatCurrency(product.salePrice)}
-                          </p>
-                        )}
-                      </div>
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`font-mono text-xs font-semibold ${product.available === 0 ? "text-danger" : product.available <= product.lowStockThreshold ? "text-warning" : "text-text"}`}
-                        >
-                          {product.available}
+                      </Td>
+
+                      {/* SKU */}
+                      <Td>
+                        <span className="font-mono text-xs text-brand">
+                          {product.sku}
                         </span>
-                        {product.variants && (
-                          <span className="text-[10px] text-text-muted bg-surface-elevated px-1 rounded">
-                            {product.variants.length}v
+                      </Td>
+
+                      {/* Category */}
+                      <Td>
+                        <span className="text-xs text-text-secondary">
+                          {product.category.name}
+                        </span>
+                      </Td>
+
+                      {/* Price */}
+                      <Td>
+                        <div>
+                          <p className="font-mono text-xs font-medium text-text">
+                            {formatCurrency(Number(product.price))}
+                          </p>
+
+                          {product.comparePrice !== null && (
+                            <p className="font-mono text-[11px] text-text-muted line-through">
+                              {formatCurrency(Number(product.comparePrice))}
+                            </p>
+                          )}
+                        </div>
+                      </Td>
+
+                      {/* Stock */}
+                      <Td>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-mono text-xs font-semibold ${
+                              product.stock === 0
+                                ? "text-danger"
+                                : product.stock <= product.lowStockAt
+                                  ? "text-warning"
+                                  : "text-text"
+                            }`}
+                          >
+                            {product.stock}
                           </span>
-                        )}
-                      </div>
-                    </Td>
-                    <Td>
-                      <StockBadge status={getStockStatus(product)} />
-                    </Td>
-                    <Td>
-                      <span className="text-xs text-text-muted">
-                        {formatShortDate(product.updatedAt)}
-                      </span>
-                    </Td>
-                    <Td>
-                      <div
-                        className="flex items-center gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
-                          onClick={() =>
-                            onNavigate("product-detail", product.id)
-                          }
+                        </div>
+                      </Td>
+
+                      {/* Status */}
+                      <Td>
+                        <StockBadge status={stockStatus} />
+                      </Td>
+
+                      {/* Updated */}
+                      <Td>
+                        <span className="text-xs text-text-muted">
+                          {formatShortDate(new Date(product.updatedAt))}
+                        </span>
+                      </Td>
+
+                      {/* Actions */}
+                      <Td>
+                        <div
+                          className="flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors">
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
-                        <button className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-danger hover:bg-danger/10 transition-colors">
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
+                          {/* View */}
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
+                            onClick={() =>
+                              onNavigate("product-detail", product.id)
+                            }
+                            title="View product"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Edit */}
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
+                            onClick={() =>
+                              onNavigate("product-detail", product.id)
+                            }
+                            title="Edit product"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Archive */}
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
+                            onClick={() => handleArchive(product)}
+                            title="Archive product"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </Td>
+                    </Tr>
+                  );
+                })}
               </Tbody>
             </Table>
+
             <Pagination
               page={page}
-              total={filtered.length}
-              perPage={perPage}
+              total={total}
+              perPage={PER_PAGE}
               onChange={setPage}
             />
           </>
