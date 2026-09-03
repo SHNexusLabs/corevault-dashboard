@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Warehouse,
   TrendingUp,
@@ -24,156 +24,23 @@ import {
 } from "@/components/ui/Table";
 import { StockBadge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
-import { formatCurrency } from "@/lib/utils";
 
-type StockStatus = "in_stock" | "low_stock" | "out_of_stock";
+import { formatCurrency, formatDate } from "@/lib/utils";
 
-type InventoryProduct = {
-  id: string;
-  name: string;
-  sku: string;
-  brand: string;
-  category: string;
-  stock: number;
-  reserved: number;
-  lowStockAt: number;
-  price: number;
-};
+import {
+  getAdminProducts,
+  type AdminProduct,
+  type AdminProductStats,
+  type ProductStockStatus,
+} from "@/lib/admin-products";
 
-const products: InventoryProduct[] = [
-  {
-    id: "1",
-    name: "AMD Ryzen 7 9700X",
-    sku: "CPU-R7-9700X",
-    brand: "AMD",
-    category: "Processors",
-    stock: 24,
-    reserved: 4,
-    lowStockAt: 5,
-    price: 34999,
-  },
-  {
-    id: "2",
-    name: "NVIDIA RTX 4070 Super",
-    sku: "GPU-RTX4070S",
-    brand: "NVIDIA",
-    category: "Graphics Cards",
-    stock: 8,
-    reserved: 2,
-    lowStockAt: 5,
-    price: 59999,
-  },
-  {
-    id: "3",
-    name: "Intel Core i7-14700K",
-    sku: "CPU-I7-14700K",
-    brand: "Intel",
-    category: "Processors",
-    stock: 3,
-    reserved: 1,
-    lowStockAt: 5,
-    price: 38999,
-  },
-  {
-    id: "4",
-    name: "Samsung 990 Pro 2TB",
-    sku: "SSD-990PRO-2T",
-    brand: "Samsung",
-    category: "Storage",
-    stock: 15,
-    reserved: 3,
-    lowStockAt: 5,
-    price: 16999,
-  },
-  {
-    id: "5",
-    name: "Kingston Fury 32GB",
-    sku: "RAM-FURY-32",
-    brand: "Kingston",
-    category: "Memory",
-    stock: 0,
-    reserved: 0,
-    lowStockAt: 5,
-    price: 8999,
-  },
-  {
-    id: "6",
-    name: "Logitech G Pro X Keyboard",
-    sku: "KEY-GPRO-X",
-    brand: "Logitech",
-    category: "Keyboards",
-    stock: 11,
-    reserved: 2,
-    lowStockAt: 5,
-    price: 12999,
-  },
-  {
-    id: "7",
-    name: "LG UltraGear 27GR",
-    sku: "MON-LG-27GR",
-    brand: "LG",
-    category: "Monitors",
-    stock: 6,
-    reserved: 1,
-    lowStockAt: 3,
-    price: 29999,
-  },
-  {
-    id: "8",
-    name: "Logitech G502 X",
-    sku: "MSE-G502X",
-    brand: "Logitech",
-    category: "Mice",
-    stock: 19,
-    reserved: 3,
-    lowStockAt: 5,
-    price: 7499,
-  },
-  {
-    id: "9",
-    name: "Corsair RM850e",
-    sku: "PSU-RM850E",
-    brand: "Corsair",
-    category: "Power Supplies",
-    stock: 4,
-    reserved: 1,
-    lowStockAt: 5,
-    price: 10999,
-  },
-];
+import {
+  adjustAdminProductStock,
+  getAdminProductInventoryHistory,
+  type InventoryHistoryItem,
+} from "@/lib/admin-inventory";
 
-const movements = [
-  {
-    id: "1",
-    productName: "AMD Ryzen 7 9700X",
-    sku: "CPU-R7-9700X",
-    change: 10,
-    reason: "Restock",
-    reference: "PO-1045",
-    user: "Admin",
-    date: "Today, 10:32 AM",
-  },
-  {
-    id: "2",
-    productName: "NVIDIA RTX 4070 Super",
-    sku: "GPU-RTX4070S",
-    change: -2,
-    reason: "Damaged",
-    reference: "ADJ-204",
-    user: "Admin",
-    date: "Yesterday, 04:15 PM",
-  },
-  {
-    id: "3",
-    productName: "Samsung 990 Pro 2TB",
-    sku: "SSD-990PRO-2T",
-    change: 5,
-    reason: "Return Received",
-    reference: "RET-118",
-    user: "Manager",
-    date: "Yesterday, 01:42 PM",
-  },
-];
+import type { StockStatus } from "@/lib/types";
 
 const ADJUST_REASONS = [
   "Restock",
@@ -184,7 +51,16 @@ const ADJUST_REASONS = [
   "Count Adjustment",
 ];
 
-function getStockStatus(product: InventoryProduct): StockStatus {
+const PER_PAGE = 8;
+
+type HistoryMetadata = {
+  quantity?: number;
+  previousStock?: number;
+  newStock?: number;
+  reason?: string;
+};
+
+function getStockStatus(product: AdminProduct): StockStatus {
   if (product.stock === 0) {
     return "out_of_stock";
   }
@@ -196,64 +72,269 @@ function getStockStatus(product: InventoryProduct): StockStatus {
   return "in_stock";
 }
 
+function getHistoryMetadata(value: unknown): HistoryMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const data = value as Record<string, unknown>;
+
+  return {
+    quantity: typeof data.quantity === "number" ? data.quantity : undefined,
+
+    previousStock:
+      typeof data.previousStock === "number" ? data.previousStock : undefined,
+
+    newStock: typeof data.newStock === "number" ? data.newStock : undefined,
+
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
 export default function InventoryPage() {
+  const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [stats, setStats] = useState<AdminProductStats | null>(null);
+
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
   const [stockFilter, setStockFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [totalProducts, setTotalProducts] = useState(0);
+
+  const [inventoryValue, setInventoryValue] = useState(0);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [adjustModal, setAdjustModal] = useState(false);
   const [historyModal, setHistoryModal] = useState(false);
 
-  const [selectedProduct, setSelectedProduct] =
-    useState<InventoryProduct | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<AdminProduct | null>(
+    null,
+  );
 
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustReason, setAdjustReason] = useState("Restock");
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
 
-  const perPage = 8;
+  const [history, setHistory] = useState<InventoryHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  const filtered = products.filter((product) => {
-    const query = search.toLowerCase().trim();
+  /*
+   * Debounce product search so we do not hit the API
+   * on every keyboard event.
+   */
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 350);
 
-    const matchesSearch =
-      !query ||
-      product.name.toLowerCase().includes(query) ||
-      product.sku.toLowerCase().includes(query);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [search]);
 
-    const matchesStock =
-      !stockFilter || getStockStatus(product) === stockFilter;
+  /*
+   * Load the current inventory table page.
+   *
+   * Search/filter/pagination are handled by the existing
+   * admin products endpoint.
+   */
+  const loadInventory = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-    return matchesSearch && matchesStock;
-  });
+      const response = await getAdminProducts(page, PER_PAGE, {
+        search: debouncedSearch || undefined,
 
-  const paged = filtered.slice((page - 1) * perPage, page * perPage);
+        stockStatus:
+          stockFilter !== "" ? (stockFilter as ProductStockStatus) : undefined,
+      });
 
-  const totalValue = products.reduce(
-    (sum, product) => sum + product.stock * product.price,
-    0,
-  );
+      setProducts(response.products);
+      setStats(response.stats);
+      setTotalProducts(response.pagination.total);
 
-  const totalSKUs = products.length;
+      /*
+       * Keep a useful selected product for the toolbar buttons.
+       */
+      if (response.products.length > 0) {
+        setSelectedProduct((current) => {
+          if (!current) {
+            return response.products[0];
+          }
 
-  const lowStock = products.filter(
-    (product) => getStockStatus(product) === "low_stock",
-  ).length;
+          const refreshedProduct = response.products.find(
+            (product) => product.id === current.id,
+          );
 
-  const outOfStock = products.filter(
-    (product) => getStockStatus(product) === "out_of_stock",
-  ).length;
+          return refreshedProduct ?? current;
+        });
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load inventory.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [page, debouncedSearch, stockFilter]);
 
-  function openAdjust(product?: InventoryProduct) {
-    setSelectedProduct(product ?? products[0]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (cancelled) return;
+      await loadInventory();
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadInventory]);
+
+  /*
+   * Products API already provides accurate total, low-stock,
+   * and out-of-stock counts.
+   *
+   * Inventory value is not currently part of that stats object,
+   * so fetch the product catalogue in batches and calculate:
+   *
+   * stock × price
+   */
+  const loadInventoryValue = useCallback(async () => {
+    try {
+      const batchSize = 100;
+
+      const firstResponse = await getAdminProducts(1, batchSize, {});
+
+      let allProducts = [...firstResponse.products];
+
+      const totalPages = firstResponse.pagination.totalPages;
+
+      if (totalPages > 1) {
+        const requests = [];
+
+        for (let currentPage = 2; currentPage <= totalPages; currentPage++) {
+          requests.push(getAdminProducts(currentPage, batchSize, {}));
+        }
+
+        const responses = await Promise.all(requests);
+
+        for (const response of responses) {
+          allProducts = [...allProducts, ...response.products];
+        }
+      }
+
+      const totalValue = allProducts.reduce((sum, product) => {
+        const price = Number(product.price);
+
+        if (!Number.isFinite(price)) {
+          return sum;
+        }
+
+        return sum + product.stock * price;
+      }, 0);
+
+      setInventoryValue(totalValue);
+    } catch {
+      setInventoryValue(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (cancelled) return;
+      await loadInventoryValue();
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadInventoryValue]);
+
+  function openAdjustModal(product: AdminProduct) {
+    setSelectedProduct(product);
     setAdjustQty("");
     setAdjustReason("Restock");
+    setAdjustError(null);
     setAdjustModal(true);
   }
 
-  function openHistory(product?: InventoryProduct) {
-    setSelectedProduct(product ?? products[0]);
-    setHistoryModal(true);
+  async function handleAdjustment() {
+    if (!selectedProduct) {
+      return;
+    }
+
+    const quantity = Number(adjustQty);
+
+    if (!Number.isInteger(quantity) || quantity === 0) {
+      setAdjustError("Enter a non-zero whole number.");
+      return;
+    }
+
+    try {
+      setAdjusting(true);
+      setAdjustError(null);
+
+      await adjustAdminProductStock(selectedProduct.id, quantity, adjustReason);
+
+      setAdjustModal(false);
+      setAdjustQty("");
+
+      await Promise.all([loadInventory(), loadInventoryValue()]);
+    } catch (err) {
+      setAdjustError(
+        err instanceof Error ? err.message : "Failed to adjust stock.",
+      );
+    } finally {
+      setAdjusting(false);
+    }
   }
+
+  async function openHistoryModal(product: AdminProduct) {
+    setSelectedProduct(product);
+
+    setHistoryModal(true);
+    setHistory([]);
+    setHistoryError(null);
+    setHistoryLoading(true);
+
+    try {
+      const response = await getAdminProductInventoryHistory(product.id);
+
+      setHistory(response.history);
+    } catch (err) {
+      setHistoryError(
+        err instanceof Error ? err.message : "Failed to load stock history.",
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  const totalSKUs = stats?.total ?? 0;
+  const lowStock = stats?.lowStock ?? 0;
+  const outOfStock = stats?.outOfStock ?? 0;
+
+  const selectedStockStatus = useMemo(() => {
+    if (!selectedProduct) {
+      return null;
+    }
+
+    return getStockStatus(selectedProduct);
+  }, [selectedProduct]);
 
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -268,7 +349,7 @@ export default function InventoryPage() {
 
         <KPICard
           label="Inventory Value"
-          value={formatCurrency(totalValue)}
+          value={formatCurrency(inventoryValue)}
           icon={<TrendingUp className="w-5 h-5 text-purple-400" />}
           iconBg="bg-purple-500/10 border border-purple-500/20"
         />
@@ -276,6 +357,7 @@ export default function InventoryPage() {
         <KPICard
           label="Low Stock SKUs"
           value={lowStock}
+          change={lowStock > 0 ? -5 : 0}
           icon={<AlertTriangle className="w-5 h-5 text-warning" />}
           iconBg="bg-warning-muted border border-warning/20"
         />
@@ -283,28 +365,28 @@ export default function InventoryPage() {
         <KPICard
           label="Out of Stock"
           value={outOfStock}
+          change={outOfStock > 0 ? -2 : 0}
           icon={<TrendingDown className="w-5 h-5 text-danger" />}
           iconBg="bg-danger-muted border border-danger/20"
         />
       </div>
 
-      {/* Inventory */}
       <Card>
+        {/* Header */}
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="text-sm font-semibold text-text">Inventory</h2>
-
-            <p className="text-xs text-text-muted mt-0.5">
-              Monitor stock levels across your catalog.
-            </p>
-          </div>
+          <h2 className="text-sm font-semibold text-text">Inventory</h2>
 
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
               size="sm"
               icon={<History className="w-3.5 h-3.5" />}
-              onClick={() => openHistory()}
+              disabled={!selectedProduct}
+              onClick={() => {
+                if (selectedProduct) {
+                  void openHistoryModal(selectedProduct);
+                }
+              }}
             >
               Stock History
             </Button>
@@ -313,7 +395,12 @@ export default function InventoryPage() {
               variant="primary"
               size="sm"
               icon={<Plus className="w-3.5 h-3.5" />}
-              onClick={() => openAdjust()}
+              disabled={!selectedProduct}
+              onClick={() => {
+                if (selectedProduct) {
+                  openAdjustModal(selectedProduct);
+                }
+              }}
             >
               Adjust Stock
             </Button>
@@ -326,159 +413,197 @@ export default function InventoryPage() {
             className="w-56"
             placeholder="Search products, SKUs..."
             value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
+            onChange={(e) => {
+              setSearch(e.target.value);
             }}
           />
 
           <Select
             value={stockFilter}
-            onChange={(event) => {
-              setStockFilter(event.target.value);
+            onChange={(e) => {
+              setStockFilter(e.target.value);
               setPage(1);
             }}
           >
             <option value="">All Stock</option>
+
             <option value="in_stock">In Stock</option>
+
             <option value="low_stock">Low Stock</option>
+
             <option value="out_of_stock">Out of Stock</option>
           </Select>
         </div>
 
-        {/* Table */}
-        <Table>
-          <Thead>
-            <tr>
-              <Th>Product</Th>
-              <Th>SKU</Th>
-              <Th sortable>Physical</Th>
-              <Th sortable>Reserved</Th>
-              <Th sortable>Available</Th>
-              <Th>Threshold</Th>
-              <Th>Status</Th>
-              <Th className="w-20" />
-            </tr>
-          </Thead>
+        {/* Error */}
+        {error && (
+          <div className="px-4 py-3 border-b border-border bg-danger-muted">
+            <p className="text-xs text-danger">{error}</p>
+          </div>
+        )}
 
-          <Tbody>
-            {paged.map((product) => {
-              const status = getStockStatus(product);
+        {/* Loading */}
+        {loading ? (
+          <div className="py-16 text-center">
+            <p className="text-xs text-text-muted">Loading inventory...</p>
+          </div>
+        ) : products.length === 0 ? (
+          <div className="py-16 text-center">
+            <Warehouse className="w-8 h-8 mx-auto text-text-muted mb-2" />
 
-              const available = product.stock - product.reserved;
+            <p className="text-sm text-text-secondary">No products found.</p>
 
-              return (
-                <Tr key={product.id}>
-                  <Td>
-                    <div>
-                      <p className="text-xs font-medium text-text max-w-50 truncate">
-                        {product.name}
-                      </p>
+            <p className="text-xs text-text-muted mt-1">
+              Try changing your search or stock filter.
+            </p>
+          </div>
+        ) : (
+          <>
+            <Table>
+              <Thead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>SKU</Th>
+                  <Th sortable>Physical</Th>
+                  <Th sortable>Reserved</Th>
+                  <Th sortable>Available</Th>
+                  <Th>Threshold</Th>
+                  <Th>Status</Th>
+                  <Th className="w-20" />
+                </tr>
+              </Thead>
 
-                      <p className="text-[11px] text-text-muted">
-                        {product.brand} · {product.category}
-                      </p>
-                    </div>
-                  </Td>
+              <Tbody>
+                {products.map((product) => {
+                  const status = getStockStatus(product);
 
-                  <Td>
-                    <span className="font-mono text-xs text-brand">
-                      {product.sku}
-                    </span>
-                  </Td>
+                  /*
+                   * Reservation tracking does not
+                   * currently exist in the backend.
+                   */
+                  const reserved = 0;
+                  const available = product.stock;
 
-                  <Td>
-                    <span className="font-mono text-xs text-text">
-                      {product.stock}
-                    </span>
-                  </Td>
-
-                  <Td>
-                    <span
-                      className={`font-mono text-xs ${
-                        product.reserved > 0
-                          ? "text-warning"
-                          : "text-text-muted"
-                      }`}
+                  return (
+                    <Tr
+                      key={product.id}
+                      onClick={() => setSelectedProduct(product)}
                     >
-                      {product.reserved}
-                    </span>
-                  </Td>
+                      <Td>
+                        <div>
+                          <p className="text-xs font-medium text-text max-w-50 truncate">
+                            {product.name}
+                          </p>
 
-                  <Td>
-                    <span
-                      className={`font-mono text-xs font-semibold ${
-                        status === "out_of_stock"
-                          ? "text-danger"
-                          : status === "low_stock"
-                            ? "text-warning"
-                            : "text-success"
-                      }`}
-                    >
-                      {available}
-                    </span>
-                  </Td>
+                          <p className="text-[11px] text-text-muted">
+                            {product.brand.name}
+                            {" · "}
+                            {product.category.name}
+                          </p>
+                        </div>
+                      </Td>
 
-                  <Td>
-                    <span className="font-mono text-xs text-text-muted">
-                      {product.lowStockAt}
-                    </span>
-                  </Td>
+                      <Td>
+                        <span className="font-mono text-xs text-brand">
+                          {product.sku}
+                        </span>
+                      </Td>
 
-                  <Td>
-                    <StockBadge status={status} />
-                  </Td>
+                      <Td>
+                        <span className="font-mono text-xs text-text">
+                          {product.stock}
+                        </span>
+                      </Td>
 
-                  <Td>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        title="Adjust stock"
-                        onClick={() => openAdjust(product)}
-                        className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-brand hover:bg-brand-muted transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
+                      <Td>
+                        <span className="font-mono text-xs text-text-muted">
+                          {reserved}
+                        </span>
+                      </Td>
 
-                      <button
-                        type="button"
-                        title="Stock history"
-                        onClick={() => openHistory(product)}
-                        className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
-                      >
-                        <History className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Tbody>
-        </Table>
+                      <Td>
+                        <span
+                          className={`font-mono text-xs font-semibold ${
+                            status === "out_of_stock"
+                              ? "text-danger"
+                              : status === "low_stock"
+                                ? "text-warning"
+                                : "text-success"
+                          }`}
+                        >
+                          {available}
+                        </span>
+                      </Td>
 
-        <Pagination
-          page={page}
-          total={filtered.length}
-          perPage={perPage}
-          onChange={setPage}
-        />
+                      <Td>
+                        <span className="font-mono text-xs text-text-muted">
+                          {product.lowStockAt}
+                        </span>
+                      </Td>
+
+                      <Td>
+                        <StockBadge status={status} />
+                      </Td>
+
+                      <Td>
+                        <div
+                          className="flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-brand hover:bg-brand-muted transition-colors"
+                            title="Adjust stock"
+                            onClick={() => openAdjustModal(product)}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
+                            title="Stock history"
+                            onClick={() => void openHistoryModal(product)}
+                          >
+                            <History className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </Td>
+                    </Tr>
+                  );
+                })}
+              </Tbody>
+            </Table>
+
+            <Pagination
+              page={page}
+              total={totalProducts}
+              perPage={PER_PAGE}
+              onChange={setPage}
+            />
+          </>
+        )}
       </Card>
 
-      {/* Inventory note */}
+      {/* Inventory state explanation */}
       <div className="bg-brand-muted border border-brand/20 rounded-xl p-3 flex items-start gap-2.5">
         <div className="w-4 h-4 text-brand mt-0.5 shrink-0">ℹ️</div>
 
         <div className="text-xs text-text-secondary">
           <strong className="text-text">Inventory states:</strong> Physical
-          stock is the total on-hand. Reserved is held for confirmed orders.
-          Available = Physical − Reserved.
+          stock represents the current on-hand quantity. Reserved stock tracking
+          is not currently implemented, so Available equals Physical.
         </div>
       </div>
 
-      {/* Adjust Stock */}
+      {/* Adjust Stock Modal */}
       <Modal
         open={adjustModal}
-        onClose={() => setAdjustModal(false)}
+        onClose={() => {
+          if (!adjusting) {
+            setAdjustModal(false);
+          }
+        }}
         title="Adjust Stock"
         size="sm"
         footer={
@@ -486,6 +611,7 @@ export default function InventoryPage() {
             <Button
               variant="secondary"
               size="sm"
+              disabled={adjusting}
               onClick={() => setAdjustModal(false)}
             >
               Cancel
@@ -494,9 +620,10 @@ export default function InventoryPage() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => setAdjustModal(false)}
+              disabled={adjusting || !selectedProduct}
+              onClick={() => void handleAdjustment()}
             >
-              Apply Adjustment
+              {adjusting ? "Applying..." : "Apply Adjustment"}
             </Button>
           </>
         }
@@ -518,6 +645,12 @@ export default function InventoryPage() {
                   {selectedProduct.stock}
                 </span>
               </p>
+
+              {selectedStockStatus && (
+                <div className="mt-2">
+                  <StockBadge status={selectedStockStatus} />
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -528,28 +661,37 @@ export default function InventoryPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() =>
-                    setAdjustQty((value) => String((Number(value) || 0) - 1))
-                  }
                   className="w-8 h-8 rounded-lg border border-border bg-surface-elevated text-text-secondary hover:text-text transition-colors flex items-center justify-center font-bold"
+                  onClick={() => {
+                    const current = Number(adjustQty) || 0;
+
+                    setAdjustQty(String(current - 1));
+                  }}
                 >
                   −
                 </button>
 
                 <input
                   type="number"
+                  step="1"
                   value={adjustQty}
-                  onChange={(event) => setAdjustQty(event.target.value)}
+                  onChange={(e) => {
+                    setAdjustQty(e.target.value);
+
+                    setAdjustError(null);
+                  }}
                   placeholder="0"
                   className="flex-1 h-8 rounded-lg border border-border bg-surface-elevated text-sm text-text text-center px-3 focus:outline-none focus:ring-1 focus:ring-brand/40"
                 />
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setAdjustQty((value) => String((Number(value) || 0) + 1))
-                  }
                   className="w-8 h-8 rounded-lg border border-border bg-surface-elevated text-text-secondary hover:text-text transition-colors flex items-center justify-center font-bold"
+                  onClick={() => {
+                    const current = Number(adjustQty) || 0;
+
+                    setAdjustQty(String(current + 1));
+                  }}
                 >
                   +
                 </button>
@@ -567,7 +709,7 @@ export default function InventoryPage() {
 
               <select
                 value={adjustReason}
-                onChange={(event) => setAdjustReason(event.target.value)}
+                onChange={(e) => setAdjustReason(e.target.value)}
                 className="w-full h-8 rounded-lg border border-border bg-surface-elevated text-sm text-text px-2.5 focus:outline-none focus:ring-1 focus:ring-brand/40"
               >
                 {ADJUST_REASONS.map((reason) => (
@@ -578,68 +720,110 @@ export default function InventoryPage() {
               </select>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
-                Reference (PO / Note)
-              </label>
-
-              <input
-                placeholder="e.g. PO-1045"
-                className="w-full h-8 rounded-lg border border-border bg-surface-elevated text-sm text-text px-3 placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-brand/40"
-              />
-            </div>
+            {adjustError && (
+              <div className="rounded-lg border border-danger/20 bg-danger-muted px-3 py-2">
+                <p className="text-xs text-danger">{adjustError}</p>
+              </div>
+            )}
           </div>
         )}
       </Modal>
 
-      {/* History */}
+      {/* History Modal */}
       <Modal
         open={historyModal}
         onClose={() => setHistoryModal(false)}
         title="Stock Movement History"
         size="lg"
       >
-        <div className="divide-y divide-border/50 -mx-5 -mt-5">
-          {movements.map((movement) => (
-            <div
-              key={movement.id}
-              className="px-5 py-3 flex items-center gap-3"
-            >
-              <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-mono text-xs font-bold ${
-                  movement.change > 0
-                    ? "bg-success-muted text-success"
-                    : "bg-danger-muted text-danger"
-                }`}
-              >
-                {movement.change > 0 ? `+${movement.change}` : movement.change}
-              </div>
+        {selectedProduct && (
+          <div className="mb-4 p-3 rounded-lg bg-surface-elevated border border-border">
+            <p className="text-xs font-medium text-text">
+              {selectedProduct.name}
+            </p>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-text truncate">
-                  {movement.productName}
-                </p>
+            <p className="text-[11px] font-mono text-brand">
+              {selectedProduct.sku}
+            </p>
+          </div>
+        )}
 
-                <p className="text-[11px] font-mono text-brand">
-                  {movement.sku}
-                </p>
-              </div>
+        {historyLoading ? (
+          <div className="py-10 text-center">
+            <p className="text-xs text-text-muted">Loading stock history...</p>
+          </div>
+        ) : historyError ? (
+          <div className="py-8 text-center">
+            <p className="text-xs text-danger">{historyError}</p>
+          </div>
+        ) : history.length === 0 ? (
+          <div className="py-10 text-center">
+            <History className="w-7 h-7 mx-auto text-text-muted mb-2" />
 
-              <div className="text-right text-xs text-text-secondary">
-                <p>{movement.reason}</p>
+            <p className="text-xs text-text-secondary">
+              No stock movements recorded yet.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/50 -mx-5">
+            {history.map((movement) => {
+              const metadata = getHistoryMetadata(movement.metadata);
 
-                <p className="text-[11px] text-text-muted font-mono">
-                  {movement.reference}
-                </p>
-              </div>
+              const quantity = metadata.quantity ?? 0;
 
-              <div className="text-right text-[11px] text-text-muted shrink-0 w-20">
-                <p>{movement.user}</p>
-                <p>{movement.date}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+              return (
+                <div
+                  key={movement.id}
+                  className="px-5 py-3 flex items-center gap-3"
+                >
+                  <div
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-mono text-xs font-bold ${
+                      quantity > 0
+                        ? "bg-success-muted text-success"
+                        : "bg-danger-muted text-danger"
+                    }`}
+                  >
+                    {quantity > 0 ? `+${quantity}` : quantity}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-text">
+                      {metadata.reason ??
+                        (movement.action === "STOCK_ADDED"
+                          ? "Stock added"
+                          : "Stock removed")}
+                    </p>
+
+                    <p className="text-[11px] text-text-muted">
+                      Stock:{" "}
+                      <span className="font-mono">
+                        {metadata.previousStock ?? "—"}
+                      </span>
+                      {" → "}
+                      <span className="font-mono text-text">
+                        {metadata.newStock ?? "—"}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <p className="text-[11px] text-text-secondary">
+                      {movement.user.name}
+                    </p>
+
+                    <p className="text-[10px] text-text-muted">
+                      {movement.user.role}
+                    </p>
+                  </div>
+
+                  <div className="text-right text-[11px] text-text-muted shrink-0">
+                    {formatDate(new Date(movement.createdAt))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -29,7 +29,7 @@ export async function login(
   password: string,
 ): Promise<AuthUser> {
   const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api"}/auth/login`,
+    `${process.env.BACKEND_API_URL ?? "http://localhost:4000/api"}/auth/login`,
     {
       method: "POST",
       headers: {
@@ -79,7 +79,7 @@ export function getAccessToken(): string | null {
 
 export async function getCurrentUser(): Promise<AuthUser> {
   const response = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api"}/auth/me`,
+    `${process.env.BACKEND_API_URL ?? "http://localhost:4000/api"}/auth/me`,
     {
       headers: {
         Authorization: `Bearer ${getAccessToken() ?? ""}`,
