@@ -1,378 +1,487 @@
 "use client";
 
-import { useState } from "react";
-import { Shield, Check, Info, Plus } from "lucide-react";
-import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  Info,
+  Plus,
+  Shield,
+  RotateCcw,
+  Save,
+  Loader2,
+} from "lucide-react";
 
-type Role = "admin" | "super_admin";
+import {
+  getAdminRolePermissions,
+  updateAdminRolePermissions,
+  type AdminRole,
+  type AdminRolePermission,
+} from "@/lib/admin-roles";
 
-const ROLES: {
-  value: Role;
+type RoleOption = {
+  value: AdminRole;
   label: string;
-  desc: string;
-  color: string;
-}[] = [
+  description: string;
+  iconClass: string;
+};
+
+const ROLES: RoleOption[] = [
   {
-    value: "admin",
+    value: "ADMIN",
     label: "Admin",
-    desc: "Operational staff",
-    color: "text-blue-400",
+    description: "Operational staff",
+    iconClass: "text-blue-400",
   },
   {
-    value: "super_admin",
+    value: "SUPER_ADMIN",
     label: "Super Admin",
-    desc: "System owner",
-    color: "text-brand",
+    description: "System owner",
+    iconClass: "text-brand",
   },
 ];
-
-const PERMISSIONS = [
-  {
-    section: "Operations",
-    perms: [
-      { id: "dashboard", label: "Dashboard", desc: "View the main dashboard" },
-      { id: "orders.view", label: "Orders – View", desc: "View all orders" },
-      {
-        id: "orders.manage",
-        label: "Orders – Manage",
-        desc: "Update order status, add notes",
-      },
-      {
-        id: "fulfillment",
-        label: "Fulfillment",
-        desc: "Processing, packing, shipping queues",
-      },
-      {
-        id: "packing",
-        label: "Packing",
-        desc: "Access packing queue and packing details",
-      },
-      {
-        id: "shipping",
-        label: "Shipping",
-        desc: "Shipping queue, courier assignment",
-      },
-      {
-        id: "returns",
-        label: "Returns",
-        desc: "View and manage return requests",
-      },
-    ],
-  },
-  {
-    section: "Catalog",
-    perms: [
-      {
-        id: "products.view",
-        label: "Products – View",
-        desc: "View product catalog",
-      },
-      {
-        id: "products.manage",
-        label: "Products – Manage",
-        desc: "Create, edit, archive products",
-      },
-      {
-        id: "categories",
-        label: "Categories",
-        desc: "Manage product categories",
-      },
-      {
-        id: "inventory.view",
-        label: "Inventory – View",
-        desc: "View stock levels",
-      },
-      {
-        id: "inventory.adjust",
-        label: "Inventory – Adjust",
-        desc: "Adjust stock quantities",
-      },
-    ],
-  },
-  {
-    section: "Customers & Finance",
-    perms: [
-      {
-        id: "customers",
-        label: "Customers",
-        desc: "View and manage customer accounts",
-      },
-      {
-        id: "payments.view",
-        label: "Payments – View",
-        desc: "View payment transactions",
-      },
-      {
-        id: "payments.refund",
-        label: "Payments – Refund",
-        desc: "Initiate and approve refunds",
-      },
-      { id: "invoices", label: "Invoices", desc: "View and download invoices" },
-      {
-        id: "analytics",
-        label: "Analytics",
-        desc: "View analytics and reports",
-      },
-      { id: "export", label: "Data Export", desc: "Export data to CSV/Excel" },
-    ],
-  },
-  {
-    section: "Administration",
-    superAdminOnly: true,
-    perms: [
-      {
-        id: "staff",
-        label: "Staff Management",
-        desc: "Create and manage staff accounts",
-      },
-      {
-        id: "roles",
-        label: "Roles & Permissions",
-        desc: "Manage roles and permissions",
-      },
-      { id: "audit", label: "Audit Log", desc: "View system audit logs" },
-      {
-        id: "critical_overrides",
-        label: "Critical Overrides",
-        desc: "Force cancel, bulk delete, etc.",
-      },
-    ],
-  },
-  {
-    section: "System Settings",
-    superAdminOnly: true,
-    perms: [
-      {
-        id: "settings.store",
-        label: "Store Settings",
-        desc: "Business info, currency, branding",
-      },
-      {
-        id: "settings.orders",
-        label: "Order Settings",
-        desc: "Order processing configuration",
-      },
-      {
-        id: "settings.inventory",
-        label: "Inventory Settings",
-        desc: "Stock configuration",
-      },
-      {
-        id: "settings.shipping",
-        label: "Shipping Settings",
-        desc: "Couriers, methods, zones",
-      },
-      {
-        id: "settings.payments",
-        label: "Payment Settings",
-        desc: "Payment providers configuration",
-      },
-      {
-        id: "settings.security",
-        label: "Security Settings",
-        desc: "Password policy, sessions, lockout",
-      },
-    ],
-  },
-];
-
-const ADMIN_DEFAULT: Set<string> = new Set([
-  "dashboard",
-  "orders.view",
-  "orders.manage",
-  "fulfillment",
-  "packing",
-  "shipping",
-  "returns",
-  "products.view",
-  "products.manage",
-  "categories",
-  "inventory.view",
-  "inventory.adjust",
-  "customers",
-  "payments.view",
-  "invoices",
-  "analytics",
-  "export",
-]);
-
-const SUPER_ADMIN_ALL: Set<string> = new Set(
-  PERMISSIONS.flatMap((s) => s.perms.map((p) => p.id)),
-);
 
 export function RolesPermissions() {
-  const [selectedRole, setSelectedRole] = useState<Role>("admin");
-  const [adminPerms, setAdminPerms] = useState<Set<string>>(
-    new Set(ADMIN_DEFAULT),
+  const [selectedRole, setSelectedRole] = useState<AdminRole>("ADMIN");
+
+  const [permissions, setPermissions] = useState<AdminRolePermission[]>([]);
+
+  const [originalPermissions, setOriginalPermissions] = useState<Set<string>>(
+    new Set(),
   );
+
+  const [isEditable, setIsEditable] = useState(true);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
   const [changed, setChanged] = useState(false);
 
-  const currentPerms =
-    selectedRole === "super_admin" ? SUPER_ADMIN_ALL : adminPerms;
+  /*
+   * Load permissions for the selected role.
+   */
 
-  const togglePerm = (id: string) => {
-    if (selectedRole === "super_admin") return;
-    const n = new Set(adminPerms);
-    if (n.has(id)) {
-      n.delete(id);
-    } else {
-      n.add(id);
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await getAdminRolePermissions(selectedRole);
+
+        if (cancelled) return;
+
+        setPermissions(response.permissions);
+        setIsEditable(response.isEditable);
+
+        const enabledPermissions = new Set(
+          response.permissions
+            .filter((permission) => permission.enabled)
+            .map((permission) => permission.id),
+        );
+
+        setOriginalPermissions(enabledPermissions);
+        setChanged(false);
+      } catch (err) {
+        if (cancelled) return;
+
+        setError(
+          err instanceof Error ? err.message : "Failed to load permissions",
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRole]);
+
+  /*
+   * Group permissions by the section provided by the backend.
+   */
+  const permissionSections = useMemo(() => {
+    const sectionOrder = [
+      "Operations",
+      "Catalog",
+      "Customers & Finance",
+      "Administration",
+      "System Settings",
+    ];
+
+    const sections = new Map<string, AdminRolePermission[]>();
+
+    for (const permission of permissions) {
+      const existing = sections.get(permission.section);
+
+      if (existing) {
+        existing.push(permission);
+      } else {
+        sections.set(permission.section, [permission]);
+      }
     }
-    setAdminPerms(n);
+
+    return sectionOrder
+      .filter((section) => sections.has(section))
+      .map((section) => ({
+        section,
+        permissions: sections.get(section) ?? [],
+      }));
+  }, [permissions]);
+
+  /*
+   * Toggle an ADMIN permission.
+   *
+   * SUPER_ADMIN permissions are immutable.
+   */
+  const togglePermission = (permissionId: string) => {
+    if (!isEditable || selectedRole !== "ADMIN") {
+      return;
+    }
+
+    setPermissions((current) =>
+      current.map((permission) =>
+        permission.id === permissionId
+          ? {
+              ...permission,
+              enabled: !permission.enabled,
+            }
+          : permission,
+      ),
+    );
+
     setChanged(true);
   };
 
-  return (
-    <div className="flex-1 overflow-y-auto p-5 space-y-4">
-      {/* Role tabs */}
-      <div className="flex items-center gap-3">
-        {ROLES.map((r) => (
-          <button
-            key={r.value}
-            className={cn(
-              "flex items-center gap-3 px-4 py-3 rounded-xl border transition-all text-left",
-              selectedRole === r.value
-                ? "border-brand/40 bg-brand-muted"
-                : "border-border bg-surface-card hover:border-border/80",
-            )}
-            onClick={() => setSelectedRole(r.value)}
-          >
-            <Shield className={`w-5 h-5 ${r.color}`} />
-            <div>
-              <p className="text-sm font-semibold text-text">{r.label}</p>
-              <p className="text-[11px] text-text-muted">{r.desc}</p>
-            </div>
-            {selectedRole === r.value && (
-              <Check className="w-4 h-4 text-brand ml-2" />
-            )}
-          </button>
-        ))}
+  /*
+   * Save ADMIN permissions to the backend.
+   */
+  const handleSave = async () => {
+    if (!isEditable || selectedRole !== "ADMIN") {
+      return;
+    }
 
-        {changed && selectedRole === "admin" && (
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setAdminPerms(new Set(ADMIN_DEFAULT));
-                setChanged(false);
-              }}
-            >
-              Reset
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setChanged(false)}
-            >
-              Save Changes
-            </Button>
+    setSaving(true);
+    setError(null);
+
+    try {
+      const permissionIds = permissions
+        .filter((permission) => permission.enabled)
+        .map((permission) => permission.id);
+
+      const response = await updateAdminRolePermissions(permissionIds);
+
+      setPermissions(response.permissions);
+      setIsEditable(response.isEditable);
+
+      const enabledPermissions = new Set(
+        response.permissions
+          .filter((permission) => permission.enabled)
+          .map((permission) => permission.id),
+      );
+
+      setOriginalPermissions(enabledPermissions);
+      setChanged(false);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save permissions",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /*
+   * Restore the last saved database state.
+   */
+  const handleReset = () => {
+    if (!isEditable || selectedRole !== "ADMIN") {
+      return;
+    }
+
+    setPermissions((current) =>
+      current.map((permission) => ({
+        ...permission,
+        enabled: originalPermissions.has(permission.id),
+      })),
+    );
+
+    setChanged(false);
+  };
+
+  /*
+   * Switch role.
+   *
+   * Permissions are reloaded automatically through
+   * the selectedRole dependency of loadPermissions().
+   */
+  const handleRoleChange = (role: AdminRole) => {
+    if (role === selectedRole) {
+      return;
+    }
+
+    setChanged(false);
+    setError(null);
+    setSelectedRole(role);
+  };
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="space-y-6 pb-8 m-4">
+        {/* =========================================================
+            Header
+        ========================================================== */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Roles & Permissions
+            </h1>
+
+            <p className="mt-1 text-sm text-muted-foreground">
+              Manage access permissions for administrative roles.
+            </p>
+          </div>
+
+          {selectedRole === "ADMIN" && changed && isEditable && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={saving}
+                className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================
+            Error
+        ========================================================== */}
+        {error && (
+          <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {error}
           </div>
         )}
-      </div>
 
-      {selectedRole === "super_admin" && (
-        <div className="bg-brand-muted border border-brand/20 rounded-xl p-3 flex items-center gap-2">
-          <Info className="w-4 h-4 text-brand shrink-0" />
-          <p className="text-xs text-text-secondary">
-            Super Admin has all permissions and they cannot be modified. This
-            role is restricted to system owners only.
-          </p>
-        </div>
-      )}
+        {/* =========================================================
+            Role selector
+        ========================================================== */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {ROLES.map((role) => {
+            const selected = selectedRole === role.value;
 
-      {/* Permission matrix */}
-      <div className="space-y-4">
-        {PERMISSIONS.map((section) => {
-          if (section.superAdminOnly && selectedRole !== "super_admin")
-            return null;
-          return (
-            <Card key={section.section}>
-              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-semibold text-text">
-                    {section.section}
-                  </h3>
-                  {section.superAdminOnly && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-muted text-brand border border-brand/20 font-medium">
-                      Super Admin Only
-                    </span>
-                  )}
+            return (
+              <button
+                key={role.value}
+                type="button"
+                onClick={() => handleRoleChange(role.value)}
+                className={[
+                  "flex items-center gap-4 rounded-xl border p-4 text-left transition-all",
+                  selected
+                    ? "border-brand bg-brand/5"
+                    : "border-border hover:bg-muted/50",
+                ].join(" ")}
+              >
+                <div
+                  className={[
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted",
+                    role.iconClass,
+                  ].join(" ")}
+                >
+                  <Shield className="h-5 w-5" />
                 </div>
-                <span className="text-[11px] text-text-muted font-mono">
-                  {section.perms.filter((p) => currentPerms.has(p.id)).length}/
-                  {section.perms.length}
-                </span>
-              </div>
-              <div className="divide-y divide-border/50">
-                {section.perms.map((perm) => {
-                  const enabled = currentPerms.has(perm.id);
-                  const locked = selectedRole === "super_admin";
-                  return (
-                    <div
-                      key={perm.id}
-                      className={cn(
-                        "px-4 py-2.5 flex items-center gap-3 transition-colors",
-                        !locked && "cursor-pointer hover:bg-surface-elevated",
-                      )}
-                      onClick={() => !locked && togglePerm(perm.id)}
-                    >
-                      <div
-                        className={cn(
-                          "w-5 h-5 rounded flex items-center justify-center shrink-0 transition-colors border",
-                          enabled
-                            ? "bg-brand border-brand text-surface"
-                            : "border-border bg-surface-elevated text-transparent",
-                        )}
-                      >
-                        {enabled && <Check className="w-3 h-3" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p
-                          className={cn(
-                            "text-xs font-medium transition-colors",
-                            enabled ? "text-text" : "text-text-secondary",
-                          )}
-                        >
-                          {perm.label}
-                        </p>
-                        <p className="text-[11px] text-text-muted">
-                          {perm.desc}
-                        </p>
-                      </div>
-                      <span
-                        className={cn(
-                          "text-[11px] font-mono font-medium transition-colors",
-                          enabled ? "text-success" : "text-text-muted",
-                        )}
-                      >
-                        {enabled ? "Enabled" : "Disabled"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
 
-      {/* Future roles note */}
-      <div className="border border-dashed border-border/50 rounded-xl p-4 text-center">
-        <p className="text-xs text-text-muted">
-          Future roles (Packing Staff, Inventory Staff, Support Staff, Warehouse
-          Manager) can be added without redesigning this interface.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2"
-          icon={<Plus className="w-3 h-3" />}
-        >
-          Create Custom Role
-        </Button>
+                <div className="min-w-0">
+                  <div className="font-medium">{role.label}</div>
+
+                  <div className="mt-0.5 text-sm text-muted-foreground">
+                    {role.description}
+                  </div>
+                </div>
+
+                {selected && (
+                  <div className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-brand text-white">
+                    <Check className="h-3.5 w-3.5" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* =========================================================
+            Super Admin information
+        ========================================================== */}
+        {selectedRole === "SUPER_ADMIN" && (
+          <div className="flex items-start gap-3 rounded-xl border border-brand/20 bg-brand/5 p-4">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              <Info className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-medium">Super Admin has all permissions</p>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Super Admin permissions cannot be modified. System owners
+                automatically have access to all administrative capabilities.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================
+            Permission matrix
+        ========================================================== */}
+        <div className="overflow-hidden rounded-xl border border-white/5 bg-[#0b0f15]">
+          {/* Loading */}
+          {loading ? (
+            <div className="flex min-h-90 items-center justify-center">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading permissions...
+              </div>
+            </div>
+          ) : permissions.length === 0 ? (
+            <div className="flex min-h-90 items-center justify-center text-sm text-muted-foreground">
+              No permissions found.
+            </div>
+          ) : (
+            <div>
+              {permissionSections.map(
+                ({ section, permissions: sectionPermissions }) => (
+                  <div
+                    key={section}
+                    className="border-b border-white/5 last:border-b-0"
+                  >
+                    {/* Section header */}
+                    <div className="border-b border-white/5 bg-white/2 px-5 py-3">
+                      <h2 className="text-sm font-semibold">{section}</h2>
+                    </div>
+
+                    {/* Permission rows */}
+                    <div className="divide-y divide-white/5">
+                      {sectionPermissions.map((permission) => {
+                        const disabled =
+                          selectedRole === "SUPER_ADMIN" ||
+                          !isEditable ||
+                          permission.isSuperAdminOnly ||
+                          saving;
+
+                        return (
+                          <div
+                            key={permission.id}
+                            className="flex min-h-18 items-center gap-4 px-5 py-4 transition-colors hover:bg-white/2"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium">
+                                  {permission.name}
+                                </p>
+
+                                {permission.isSuperAdminOnly && (
+                                  <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">
+                                    Super Admin
+                                  </span>
+                                )}
+                              </div>
+
+                              {permission.description && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {permission.description}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Permission toggle */}
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={permission.enabled}
+                              aria-label={`Toggle ${permission.name}`}
+                              disabled={disabled}
+                              onClick={() => togglePermission(permission.id)}
+                              className={[
+                                "relative flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+                                permission.enabled ? "bg-brand" : "bg-muted",
+                                disabled
+                                  ? "cursor-not-allowed opacity-50"
+                                  : "cursor-pointer",
+                              ].join(" ")}
+                            >
+                              <span
+                                className={[
+                                  "block h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                                  permission.enabled
+                                    ? "translate-x-5"
+                                    : "translate-x-0.5",
+                                ].join(" ")}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================
+            Future custom roles
+        ========================================================== */}
+        <div className="flex flex-col gap-4 rounded-xl border border-dashed border-border p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+              <Shield className="h-4 w-4" />
+            </div>
+
+            <div>
+              <p className="font-medium">Custom roles</p>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Custom role support can be added later when your team needs more
+                granular access profiles.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled
+            className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium opacity-50"
+          >
+            <Plus className="h-4 w-4" />
+            Create Custom Role
+          </button>
+        </div>
       </div>
     </div>
   );
