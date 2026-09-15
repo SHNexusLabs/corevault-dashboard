@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { Page, UserRole } from "@/lib/types";
+import Image from "next/image";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -264,42 +265,20 @@ export function Sidebar({
           collapsed && "justify-center px-0",
         )}
       >
-        <div className="w-8 h-8 shrink-0">
-          <svg
-            viewBox="0 0 32 32"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M16 2L28 8.5V23.5L16 30L4 23.5V8.5L16 2Z"
-              fill="#22d3ee"
-              fillOpacity="0.15"
-              stroke="#22d3ee"
-              strokeWidth="1.5"
-            />
-            <rect
-              x="11"
-              y="11"
-              width="10"
-              height="10"
-              rx="2"
-              stroke="#22d3ee"
-              strokeWidth="1.5"
-              fill="none"
-            />
-            <path
-              d="M14 16h4M16 14v4"
-              stroke="#22d3ee"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          </svg>
-        </div>
+        <Image
+          src="/corevault.png"
+          alt="CoreVault"
+          width={32}
+          height={32}
+          className="h-8 w-8 shrink-0 object-contain"
+        />
+
         {!collapsed && (
           <span className="text-sm font-bold text-text tracking-wide whitespace-nowrap">
             CORE VAULT
           </span>
         )}
+
         {!collapsed && (
           <button
             className="ml-auto w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-elevated transition-colors"
