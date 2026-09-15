@@ -358,7 +358,7 @@ export function RolesPermissions() {
         {/* =========================================================
             Permission matrix
         ========================================================== */}
-        <div className="overflow-hidden rounded-xl border border-white/5 bg-[#0b0f15]">
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
           {/* Loading */}
           {loading ? (
             <div className="flex min-h-90 items-center justify-center">
@@ -377,15 +377,17 @@ export function RolesPermissions() {
                 ({ section, permissions: sectionPermissions }) => (
                   <div
                     key={section}
-                    className="border-b border-white/5 last:border-b-0"
+                    className="border-b border-border last:border-b-0"
                   >
                     {/* Section header */}
-                    <div className="border-b border-white/5 bg-white/2 px-5 py-3">
-                      <h2 className="text-sm font-semibold">{section}</h2>
+                    <div className="border-b border-border bg-muted/30 px-5 py-3">
+                      <h2 className="text-sm font-semibold text-text">
+                        {section}
+                      </h2>
                     </div>
 
                     {/* Permission rows */}
-                    <div className="divide-y divide-white/5">
+                    <div className="divide-y divide-border">
                       {sectionPermissions.map((permission) => {
                         const disabled =
                           selectedRole === "SUPER_ADMIN" ||
@@ -396,11 +398,11 @@ export function RolesPermissions() {
                         return (
                           <div
                             key={permission.id}
-                            className="flex min-h-18 items-center gap-4 px-5 py-4 transition-colors hover:bg-white/2"
+                            className="flex min-h-18 items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/30"
                           >
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-medium">
+                                <p className="text-sm font-medium text-text">
                                   {permission.name}
                                 </p>
 
