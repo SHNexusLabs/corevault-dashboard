@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -149,21 +149,41 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
 
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof window === "undefined") {
-      return "dark";
-    }
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
 
-    const savedTheme = window.localStorage.getItem("corevault-admin-theme");
+  const [mounted, setMounted] = useState(false);
 
-    return savedTheme === "light" ? "light" : "dark";
-  });
+  useEffect(() => {
+    const loadSavedTheme = () => {
+      try {
+        const savedTheme = window.localStorage.getItem("corevault-admin-theme");
+
+        if (savedTheme === "light" || savedTheme === "dark") {
+          setTheme(savedTheme);
+        }
+
+        setMounted(true);
+      } catch {
+        setMounted(true);
+      }
+    };
+
+    const frame = window.requestAnimationFrame(loadSavedTheme);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   const handleThemeToggle = () => {
     setTheme((current) => {
       const next = current === "dark" ? "light" : "dark";
 
-      window.localStorage.setItem("corevault-admin-theme", next);
+      try {
+        window.localStorage.setItem("corevault-admin-theme", next);
+      } catch {
+        // Ignore localStorage access errors.
+      }
 
       return next;
     });
@@ -217,7 +237,7 @@ export default function LoginPage() {
     <div
       className={cn(
         "min-h-screen bg-surface flex items-center justify-center p-4 relative",
-        theme === "light" && "theme-light",
+        mounted && theme === "light" && "theme-light",
       )}
     >
       {/* Background grid */}
@@ -240,7 +260,7 @@ export default function LoginPage() {
         onClick={handleThemeToggle}
         aria-label="Toggle theme"
       >
-        {theme === "dark" ? (
+        {mounted && theme === "light" ? (
           <Sun className="w-3.5 h-3.5" />
         ) : (
           <Moon className="w-3.5 h-3.5" />
