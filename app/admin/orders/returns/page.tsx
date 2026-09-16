@@ -1,4 +1,7 @@
+"use client";
+
 import { Returns } from "@/components/admin/FulfillmentQueues";
-export default function Page() {
+
+export default function ReturnsPage() {
   return <Returns />;
 }

@@ -76,45 +76,140 @@ export function pageToHref(page: Page, entityId?: string): string {
 }
 
 export function pathToPage(pathname: string): Page {
-  if (pathname === "/admin") return "dashboard";
-  if (/^\/admin\/orders\/packing\/.+/.test(pathname)) return "packing-detail";
-  if (/^\/admin\/orders\/returns\/.+/.test(pathname)) return "return-detail";
-  if (
-    /^\/admin\/orders\/[^/]+$/.test(pathname) &&
-    !pathname.endsWith("/processing") &&
-    !pathname.endsWith("/packing") &&
-    !pathname.endsWith("/ready-to-ship") &&
-    !pathname.endsWith("/shipping") &&
-    !pathname.endsWith("/returns")
-  )
+  if (pathname === "/admin") {
+    return "dashboard";
+  }
+
+  // Order list
+  if (pathname === "/admin/orders") {
+    return "orders";
+  }
+
+  // Static fulfillment pages MUST come before dynamic [id]
+  if (pathname === "/admin/orders/processing") {
+    return "processing";
+  }
+
+  if (pathname === "/admin/orders/packing") {
+    return "packing";
+  }
+
+  if (pathname === "/admin/orders/ready-to-ship") {
+    return "ready-to-ship";
+  }
+
+  if (pathname === "/admin/orders/shipping") {
+    return "shipping";
+  }
+
+  if (pathname === "/admin/orders/returns") {
+    return "returns";
+  }
+
+  // Packing detail
+  if (/^\/admin\/orders\/packing\/[^/]+$/.test(pathname)) {
+    return "packing-detail";
+  }
+
+  // Return detail
+  if (/^\/admin\/orders\/returns\/[^/]+$/.test(pathname)) {
+    return "return-detail";
+  }
+
+  // Normal order detail
+  if (/^\/admin\/orders\/[^/]+$/.test(pathname)) {
     return "order-detail";
-  if (pathname === "/admin/orders") return "orders";
-  if (pathname === "/admin/orders/processing") return "processing";
-  if (pathname === "/admin/orders/packing") return "packing";
-  if (pathname === "/admin/orders/ready-to-ship") return "ready-to-ship";
-  if (pathname === "/admin/orders/shipping") return "shipping";
-  if (pathname === "/admin/orders/returns") return "returns";
-  if (/^\/admin\/products\/.+/.test(pathname)) return "product-detail";
-  if (pathname === "/admin/products") return "products";
-  if (pathname === "/admin/categories") return "categories";
-  if (pathname === "/admin/inventory") return "inventory";
-  if (/^\/admin\/customers\/.+/.test(pathname)) return "customer-detail";
-  if (pathname === "/admin/customers") return "customers";
-  if (pathname === "/admin/analytics") return "analytics";
-  if (pathname === "/admin/payments") return "payments";
-  if (pathname === "/admin/invoices") return "invoices";
-  if (pathname === "/admin/notifications") return "notifications";
-  if (pathname === "/admin/staff") return "staff";
-  if (pathname === "/admin/roles-permissions") return "roles-permissions";
-  if (pathname === "/admin/activity-log") return "activity-log";
-  if (pathname === "/admin/settings/store") return "settings-store";
-  if (pathname === "/admin/settings/orders") return "settings-orders";
-  if (pathname === "/admin/settings/inventory") return "settings-inventory";
-  if (pathname === "/admin/settings/shipping") return "settings-shipping";
-  if (pathname === "/admin/settings/payments") return "settings-payments";
-  if (pathname === "/admin/settings/notifications")
+  }
+
+  // Products
+  if (/^\/admin\/products\/[^/]+$/.test(pathname)) {
+    return "product-detail";
+  }
+
+  if (pathname === "/admin/products") {
+    return "products";
+  }
+
+  // Categories
+  if (pathname === "/admin/categories") {
+    return "categories";
+  }
+
+  // Inventory
+  if (pathname === "/admin/inventory") {
+    return "inventory";
+  }
+
+  // Customers
+  if (/^\/admin\/customers\/[^/]+$/.test(pathname)) {
+    return "customer-detail";
+  }
+
+  if (pathname === "/admin/customers") {
+    return "customers";
+  }
+
+  // Other pages
+  if (pathname === "/admin/analytics") {
+    return "analytics";
+  }
+
+  if (pathname === "/admin/payments") {
+    return "payments";
+  }
+
+  if (pathname === "/admin/invoices") {
+    return "invoices";
+  }
+
+  if (pathname === "/admin/notifications") {
+    return "notifications";
+  }
+
+  if (pathname === "/admin/staff") {
+    return "staff";
+  }
+
+  if (pathname === "/admin/roles-permissions") {
+    return "roles-permissions";
+  }
+
+  if (pathname === "/admin/activity-log") {
+    return "activity-log";
+  }
+
+  // Settings
+  if (pathname === "/admin/settings/store") {
+    return "settings-store";
+  }
+
+  if (pathname === "/admin/settings/orders") {
+    return "settings-orders";
+  }
+
+  if (pathname === "/admin/settings/inventory") {
+    return "settings-inventory";
+  }
+
+  if (pathname === "/admin/settings/shipping") {
+    return "settings-shipping";
+  }
+
+  if (pathname === "/admin/settings/payments") {
+    return "settings-payments";
+  }
+
+  if (pathname === "/admin/settings/notifications") {
     return "settings-notifications";
-  if (pathname === "/admin/settings/security") return "settings-security";
-  if (pathname === "/admin/profile") return "profile";
+  }
+
+  if (pathname === "/admin/settings/security") {
+    return "settings-security";
+  }
+
+  if (pathname === "/admin/profile") {
+    return "profile";
+  }
+
   return "404";
 }

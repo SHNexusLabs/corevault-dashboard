@@ -1,34 +1,18 @@
 import { apiFetch } from "@/lib/api";
 
-/* -------------------------------------------------------------------------- */
-/* Types                                                                      */
-/* -------------------------------------------------------------------------- */
-
 export type OrderStatus =
   | "PENDING"
   | "PROCESSING"
+  | "PACKED"
   | "SHIPPED"
   | "DELIVERED"
   | "CANCELLED";
 
-export type PaymentStatus =
-  | "PENDING"
-  | "PAID"
-  | "FAILED"
-  | "REFUNDED";
+export type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "REFUNDED";
 
-export type PaymentMethod =
-  | "UPI"
-  | "CARD"
-  | "COD";
+export type PaymentMethod = "UPI" | "CARD" | "COD";
 
-export type DeliveryMethod =
-  | "STANDARD"
-  | "EXPRESS";
-
-/* -------------------------------------------------------------------------- */
-/* Order                                                                      */
-/* -------------------------------------------------------------------------- */
+export type DeliveryMethod = "STANDARD" | "EXPRESS";
 
 export type AdminOrderItem = {
   id: string;
@@ -69,157 +53,110 @@ export type AdminOrder = {
   items: AdminOrderItem[];
 };
 
-/* -------------------------------------------------------------------------- */
-/* Order Detail                                                               */
-/* -------------------------------------------------------------------------- */
-
-export type AdminOrderReturnRequest = {
-  id: string;
-  reason: string;
-  status: string;
-  refundAmount: number | string | null;
-  refundStatus: string;
-  adminNote: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type AdminOrderDetail = AdminOrder & {
   shippingDetails: unknown;
-  returnRequests: AdminOrderReturnRequest[];
+
+  returnRequests: Array<{
+    id: string;
+    status: string;
+    reason: string | null;
+    createdAt: string;
+    updatedAt: string;
+
+    items: Array<{
+      id: string;
+      quantity: number;
+
+      orderItem: {
+        id: string;
+        productName: string;
+        sku: string;
+      };
+    }>;
+  }>;
 };
 
-/* -------------------------------------------------------------------------- */
-/* Filters                                                                    */
-/* -------------------------------------------------------------------------- */
-
-export type AdminOrderFilters = {
+export type AdminOrdersFilters = {
   search?: string;
-  status?: OrderStatus | "";
-  paymentStatus?: PaymentStatus | "";
+  status?: OrderStatus;
+  paymentStatus?: PaymentStatus;
+  from?: string;
+  to?: string;
 };
 
-/* -------------------------------------------------------------------------- */
-/* API Responses                                                              */
-/* -------------------------------------------------------------------------- */
-
-export type AdminOrdersResponse = {
-  success: boolean;
-
-  orders: AdminOrder[];
-
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-};
-
-export type AdminOrderDetailResponse = {
-  success: boolean;
-  order: AdminOrderDetail;
-};
-
-export type UpdateOrderStatusResponse = {
-  success: boolean;
-  message: string;
-  order: AdminOrderDetail;
-};
-
-export type UpdatePaymentStatusResponse = {
-  success: boolean;
-  message: string;
-  order: AdminOrderDetail;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Orders List                                                                */
-/* -------------------------------------------------------------------------- */
-
-export function getAdminOrders(
+export async function getAdminOrders(
   page = 1,
-  limit = 10,
-  filters: AdminOrderFilters = {},
+  limit = 20,
+  filters: AdminOrdersFilters = {},
 ) {
-  const params = new URLSearchParams({
-    page: String(page),
-    limit: String(limit),
-  });
+  const params = new URLSearchParams();
 
-  if (filters.search?.trim()) {
-    params.set(
-      "search",
-      filters.search.trim(),
-    );
+  params.set("page", String(page));
+  params.set("limit", String(limit));
+
+  if (filters.search) {
+    params.set("search", filters.search);
   }
 
   if (filters.status) {
-    params.set(
-      "status",
-      filters.status,
-    );
+    params.set("status", filters.status);
   }
 
   if (filters.paymentStatus) {
-    params.set(
-      "paymentStatus",
-      filters.paymentStatus,
-    );
+    params.set("paymentStatus", filters.paymentStatus);
   }
 
-  return apiFetch<AdminOrdersResponse>(
-    `/admin/orders?${params.toString()}`,
-  );
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  return apiFetch<{
+    orders: AdminOrder[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>(`/admin/orders?${params.toString()}`);
 }
 
-/* -------------------------------------------------------------------------- */
-/* Order Detail                                                               */
-/* -------------------------------------------------------------------------- */
-
-export function getAdminOrderDetails(
-  orderId: string,
-) {
-  return apiFetch<AdminOrderDetailResponse>(
-    `/admin/orders/${orderId}`,
-  );
+export async function getAdminOrderDetails(orderId: string) {
+  return apiFetch<{
+    order: AdminOrderDetail;
+  }>(`/admin/orders/${orderId}`);
 }
 
-/* -------------------------------------------------------------------------- */
-/* Order Status                                                               */
-/* -------------------------------------------------------------------------- */
-
-export function updateAdminOrderStatus(
+export async function updateAdminOrderStatus(
   orderId: string,
   status: OrderStatus,
 ) {
-  return apiFetch<UpdateOrderStatusResponse>(
-    `/admin/orders/${orderId}/status`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        status,
-      }),
-    },
-  );
+  return apiFetch<{
+    id: string;
+    orderNumber: string;
+    status: OrderStatus;
+    updatedAt: string;
+  }>(`/admin/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
 }
 
-/* -------------------------------------------------------------------------- */
-/* Payment Status                                                             */
-/* -------------------------------------------------------------------------- */
-
-export function updateAdminPaymentStatus(
+export async function updateAdminPaymentStatus(
   orderId: string,
   paymentStatus: PaymentStatus,
 ) {
-  return apiFetch<UpdatePaymentStatusResponse>(
-    `/admin/orders/${orderId}/payment-status`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        paymentStatus,
-      }),
-    },
-  );
+  return apiFetch<{
+    id: string;
+    orderNumber: string;
+    paymentStatus: PaymentStatus;
+    updatedAt: string;
+  }>(`/admin/orders/${orderId}/payment-status`, {
+    method: "PATCH",
+    body: JSON.stringify({ paymentStatus }),
+  });
 }
-

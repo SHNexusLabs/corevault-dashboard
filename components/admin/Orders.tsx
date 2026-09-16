@@ -76,10 +76,14 @@ export function Orders({ onNavigate }: OrdersProps) {
         setLoading(true);
         setError(null);
 
-        const response = await getAdminOrders(page, perPage, {
+        const response = await getAdminOrders(1, 100, {
           search,
-          status: statusTab as OrderStatus | "",
-          paymentStatus: paymentFilter as PaymentStatus | "",
+          ...(statusTab ? { status: statusTab as OrderStatus } : {}),
+          ...(paymentFilter
+            ? {
+                paymentStatus: paymentFilter as PaymentStatus,
+              }
+            : {}),
         });
 
         if (cancelled) {
