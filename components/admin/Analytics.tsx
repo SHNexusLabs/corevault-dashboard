@@ -629,7 +629,7 @@ export function Analytics() {
         <Card className="p-10 text-center">
           <p className="text-sm font-medium text-text">
             No analytics available
-          </p>
+          </p>vs
 
           <p className="mt-1 text-xs text-text-muted">
             There is no analytics data for the selected period.
